@@ -63,16 +63,17 @@ class PreActBottleneck(nn.Module):
 
 
 class PreActResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
+    def __init__(self, block, num_blocks, num_classes=10, kc=64):
         super(PreActResNet, self).__init__()
-        self.in_planes = 64
+        self.in_planes = kc
 
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
-        self.linear = nn.Linear(512*block.expansion, num_classes)
+        self.conv1 = nn.Conv2d(3, kc, kernel_size=3, stride=1, padding=1, bias=False)
+        self.layer1 = self._make_layer(block, kc, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, kc*2, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, kc*4, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(block, kc*8, num_blocks[3], stride=2)
+        self.linear = nn.Linear(8*kc*block.expansion, num_classes)
+        self.bn = nn.BatchNorm2d(8*kc)
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
@@ -89,13 +90,14 @@ class PreActResNet(nn.Module):
         out = self.layer3(out)
         out = self.layer4(out)
         out = F.avg_pool2d(out, 4)
+        out = F.relu(self.bn(out), inplace=True)
         out = out.view(out.size(0), -1)
         out = self.linear(out)
         return out
 
 
-def PreActResNet18():
-    return PreActResNet(PreActBlock, [2,2,2,2])
+def PreActResNet18(kc=64):
+    return PreActResNet(PreActBlock, [2,2,2,2], kc=kc)
 
 def PreActResNet34():
     return PreActResNet(PreActBlock, [3,4,6,3])
