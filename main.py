@@ -44,6 +44,14 @@ transform_test = transforms.Compose([
 
 do_download = not os.path.exists('./data')
 
+if args.resume:
+    # Load checkpoint.
+    if not args.quiet: print('==> Resuming from checkpoint..')
+    checkpoint = torch.load(args.resume)
+    args.kc = checkpoint['kc']
+    args.noise = checkpoint['noise']
+    args.epoch = checkpoint['end_epoch']
+
 # Training data with optional noise
 def flip_random_label(x):
     image, label = x
@@ -61,14 +69,23 @@ if not args.eval:
         root='./data', train=True, download=do_download, transform=transform_train)
 
     if args.noise != 0:
-        noise_frac = args.noise / 100
-        num_noise_samples = int(noise_frac * len(trainset))
-        if not args.quiet: print(f'Flipping {args.noise}% of labels ({num_noise_samples} samples)')
-        noise_indices = np.random.choice(np.arange(len(trainset)), size=num_noise_samples, replace=False)
+        # If resuming we want the label flips to be the same
+        if args.resume:
+            noise_indices = checkpoint['noise_indices']
+            noise_labels = checkpoint['noise_labels']
+        else:
+            noise_frac = args.noise / 100
+            num_noise_samples = int(noise_frac * len(trainset))
+            if not args.quiet: print(f'Flipping {args.noise}% of labels ({num_noise_samples} samples)')
+            noise_indices = np.random.choice(np.arange(len(trainset)), size=num_noise_samples, replace=False)
         noisy_data = [x for x in trainset]
-        for i in noise_indices:
-            noisy_data[i] = flip_random_label(noisy_data[i])
-        noise_labels = noisy_data[1][noise_indices]
+        if args.resume:
+            for label,index in zip(noise_labels, noise_indices):
+                noisy_data[index] = (noisy_data[index][0], label)
+        else:
+            for i in noise_indices:
+                noisy_data[i] = flip_random_label(noisy_data[i])
+            noise_labels = [noisy_data[i][1] for i in noise_indices]
         trainset = noisy_data
 
     trainloader = torch.utils.data.DataLoader(
@@ -78,13 +95,6 @@ testset = torchvision.datasets.CIFAR10(
     root='./data', train=False, download=do_download, transform=transform_test)
 testloader = torch.utils.data.DataLoader(
     testset, batch_size=128, shuffle=False, num_workers=2)
-
-if args.resume:
-    # Load checkpoint.
-    if not args.quiet: print('==> Resuming from checkpoint..')
-    checkpoint = torch.load(args.resume)
-    args.kc = checkpoint['kc']
-    args.noise = checkpoint['noise']
 
 # Model
 if not args.quiet: print('==> Building model..')
@@ -96,7 +106,7 @@ if device == 'cuda':
 
 if args.resume:
     net.load_state_dict(checkpoint['net'])
-    start_epoch = checkpoint['epoch']
+    start_epoch = checkpoint['epoch'] + 1
 
 criterion = nn.CrossEntropyLoss()
 # Adam with LR=0.0001
@@ -158,6 +168,7 @@ def test(epoch):
             'noise': args.noise,
             'noise_indices': noise_indices,
             'noise_labels': noise_labels,
+            'end_epoch': args.epoch,
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
